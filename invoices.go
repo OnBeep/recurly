@@ -7,12 +7,16 @@ import (
 
 // Invoice state constants.
 const (
-	InvoiceStateOpen      = "open"      // pending collection
-	InvoiceStatePending   = "pending"   // new status will replace "open"
-	InvoiceStateCollected = "collected" // successfully collected
-	InvoiceStatePaid      = "paid"      // new status will replace "collected"
-	InvoiceStatePastDue   = "past_due"  // initial collection failed, still attempting
-	InvoiceStateFailed    = "failed"    // failed to collect
+	InvoiceStatePending    = "pending" // new status will replace "open"
+	InvoiceStateProcessing = "processing"
+	InvoiceStateCollected  = "collected" // deprecated
+	InvoiceStatePaid       = "paid"      // new status will replace "collected"
+	InvoiceStatePastDue    = "past_due"  // initial collection failed, still attempting
+	InvoiceStateFailed     = "failed"    // failed to collect
+
+	InvoiceStateOpen   = "open"   // credit only (deprecated for charge invoices)
+	InvoiceStateClosed = "closed" // credit only
+	InvoiceStateVoided = "voided" // credit only
 )
 
 // Collection method constants.
@@ -32,41 +36,63 @@ const (
 	PaymentMethodOther        = "other"
 )
 
+// Type constants.
+const (
+	InvoiceTypeCharge = "charge"
+	InvoiceTypeCredit = "credit"
+	InvoiceTypeLegacy = "legacy" // all invoices prior to change have type legacy
+)
+
+// Origin constants.
+const (
+	InvoiceOriginPurchase        = "purchase" // charge only
+	InvoiceOriginRenewal         = "renewal"  // charge only
+	InvoiceOriginImmediateChange = "immediate_change"
+	InvoiceOriginTermination     = "termination"
+	InvoiceOriginGiftCard        = "gift_card"       // credit only
+	InvoiceOriginRefund          = "refund"          // credit only
+	InvoiceOriginCredit          = "credit"          // credit only
+	InvoiceOriginWriteOff        = "write_off"       // credit only
+	InvoiceOriginExternalCredit  = "external_credit" // credit only
+)
+
 // Invoice is an individual invoice for an account.
 // The only fields annotated with XML tags are those for posting an invoice.
 // Unmarshaling an invoice is handled by the custom UnmarshalXML function.
 type Invoice struct {
-	XMLName                 xml.Name      `xml:"invoice,omitempty"`
-	AccountCode             string        `xml:"-"`
-	Address                 Address       `xml:"-"`
-	OriginalInvoiceNumber   int           `xml:"-"`
-	UUID                    string        `xml:"-"`
-	State                   string        `xml:"-"`
-	InvoiceNumberPrefix     string        `xml:"-"`
-	InvoiceNumber           int           `xml:"-"`
-	PONumber                string        `xml:"po_number,omitempty"` // PostInvoice param
-	VATNumber               string        `xml:"-"`
-	SubtotalInCents         int           `xml:"-"`
-	TaxInCents              int           `xml:"-"`
-	TotalInCents            int           `xml:"-"`
-	Currency                string        `xml:"-"`
-	DueOn                   NullTime      `xml:"-"`
-	CreatedAt               NullTime      `xml:"-"`
-	UpdatedAt               NullTime      `xml:"-"`
-	AttemptNextCollectionAt NullTime      `xml:"-"`
-	ClosedAt                NullTime      `xml:"-"`
-	Type                    string        `xml:"-"`
-	Origin                  string        `xml:"-"`
-	TaxType                 string        `xml:"-"`
-	TaxRegion               string        `xml:"-"`
-	TaxRate                 float64       `xml:"-"`
-	NetTerms                NullInt       `xml:"net_terms,omitempty"`                // PostInvoice param
-	CollectionMethod        string        `xml:"collection_method,omitempty"`        // PostInvoice param
-	TermsAndConditions      string        `xml:"terms_and_conditions,omitempty"`     // PostInvoice param
-	CustomerNotes           string        `xml:"customer_notes,omitempty"`           // PostInvoice param
-	VatReverseChargeNotes   string        `xml:"vat_reverse_charge_notes,omitempty"` // PostInvoice param
-	LineItems               []Adjustment  `xml:"-"`
-	Transactions            []Transaction `xml:"-"`
+	XMLName                 xml.Name        `xml:"invoice,omitempty"`
+	AccountCode             string          `xml:"-"`
+	Address                 Address         `xml:"-"`
+	OriginalInvoiceNumber   int             `xml:"-"`
+	UUID                    string          `xml:"-"`
+	State                   string          `xml:"-"`
+	InvoiceNumberPrefix     string          `xml:"-"`
+	InvoiceNumber           int             `xml:"-"`
+	PONumber                string          `xml:"po_number,omitempty"` // PostInvoice param
+	VATNumber               string          `xml:"-"`
+	SubtotalInCents         int             `xml:"-"`
+	TaxInCents              int             `xml:"-"`
+	TotalInCents            int             `xml:"-"`
+	BalanceInCents          int             `xml:"-"`
+	Currency                string          `xml:"-"`
+	DueOn                   NullTime        `xml:"-"`
+	CreatedAt               NullTime        `xml:"-"`
+	UpdatedAt               NullTime        `xml:"-"`
+	AttemptNextCollectionAt NullTime        `xml:"-"`
+	ClosedAt                NullTime        `xml:"-"`
+	Type                    string          `xml:"-"`
+	Origin                  string          `xml:"-"`
+	TaxType                 string          `xml:"-"`
+	TaxRegion               string          `xml:"-"`
+	TaxRate                 float64         `xml:"-"`
+	NetTerms                NullInt         `xml:"net_terms,omitempty"`                // PostInvoice param
+	CollectionMethod        string          `xml:"collection_method,omitempty"`        // PostInvoice param
+	TermsAndConditions      string          `xml:"terms_and_conditions,omitempty"`     // PostInvoice param
+	CustomerNotes           string          `xml:"customer_notes,omitempty"`           // PostInvoice param
+	VatReverseChargeNotes   string          `xml:"vat_reverse_charge_notes,omitempty"` // PostInvoice param
+	LineItems               []Adjustment    `xml:"-"`
+	Transactions            []Transaction   `xml:"-"`
+	CreditPayments          []CreditPayment `xml:"-"`
 }
 
 // UnmarshalXML unmarshals invoices and handles intermediary state during unmarshaling
@@ -93,6 +119,7 @@ func (i *Invoice) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
 		SubtotalInCents:         v.SubtotalInCents,
 		TaxInCents:              v.TaxInCents,
 		TotalInCents:            v.TotalInCents,
+		BalanceInCents:          v.BalanceInCents,
 		Currency:                v.Currency,
 		DueOn:                   v.DueOn,
 		CreatedAt:               v.CreatedAt,
@@ -108,6 +135,7 @@ func (i *Invoice) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
 		CollectionMethod:        v.CollectionMethod,
 		LineItems:               v.LineItems,
 		Transactions:            v.Transactions,
+		CreditPayments:          v.CreditPayments,
 	}
 
 	return nil
@@ -148,6 +176,7 @@ func (i *InvoiceCollection) UnmarshalXML(d *xml.Decoder, start xml.StartElement)
 		SubtotalInCents:         v.ChargeInvoice.SubtotalInCents,
 		TaxInCents:              v.ChargeInvoice.TaxInCents,
 		TotalInCents:            v.ChargeInvoice.TotalInCents,
+		BalanceInCents:          v.ChargeInvoice.BalanceInCents,
 		Currency:                v.ChargeInvoice.Currency,
 		DueOn:                   v.ChargeInvoice.DueOn,
 		CreatedAt:               v.ChargeInvoice.CreatedAt,
@@ -163,6 +192,7 @@ func (i *InvoiceCollection) UnmarshalXML(d *xml.Decoder, start xml.StartElement)
 		CollectionMethod:        v.ChargeInvoice.CollectionMethod,
 		LineItems:               v.ChargeInvoice.LineItems,
 		Transactions:            v.ChargeInvoice.Transactions,
+		CreditPayments:          v.ChargeInvoice.CreditPayments,
 	}
 	*i = InvoiceCollection{
 		XMLName:       xml.Name{Local: "invoice"},
@@ -174,34 +204,36 @@ func (i *InvoiceCollection) UnmarshalXML(d *xml.Decoder, start xml.StartElement)
 
 // invoiceFields is used by custom unmarshal functions.
 type invoiceFields struct {
-	AccountCode             hrefString    `xml:"account,omitempty"`
-	Address                 Address       `xml:"address,omitempty"`
-	SubscriptionUUID        hrefString    `xml:"subscription,omitempty"`
-	OriginalInvoiceNumber   hrefInt       `xml:"original_invoice,omitempty"`
-	UUID                    string        `xml:"uuid,omitempty"`
-	State                   string        `xml:"state,omitempty"`
-	InvoiceNumberPrefix     string        `xml:"invoice_number_prefix,omitempty"`
-	InvoiceNumber           int           `xml:"invoice_number,omitempty"`
-	PONumber                string        `xml:"po_number,omitempty"`
-	VATNumber               string        `xml:"vat_number,omitempty"`
-	SubtotalInCents         int           `xml:"subtotal_in_cents,omitempty"`
-	TaxInCents              int           `xml:"tax_in_cents,omitempty"`
-	TotalInCents            int           `xml:"total_in_cents,omitempty"`
-	Currency                string        `xml:"currency,omitempty"`
-	DueOn                   NullTime      `xml:"due_on,omitempty"`
-	CreatedAt               NullTime      `xml:"created_at,omitempty"`
-	UpdatedAt               NullTime      `xml:"updated_at,omitempty"`
-	AttemptNextCollectionAt NullTime      `xml:"attempt_next_collection_at,omitempty"`
-	ClosedAt                NullTime      `xml:"closed_at,omitempty"`
-	Type                    string        `xml:"type,omitempty"`
-	Origin                  string        `xml:"origin,omitempty"`
-	TaxType                 string        `xml:"tax_type,omitempty"`
-	TaxRegion               string        `xml:"tax_region,omitempty"`
-	TaxRate                 float64       `xml:"tax_rate,omitempty"`
-	NetTerms                NullInt       `xml:"net_terms,omitempty"`
-	CollectionMethod        string        `xml:"collection_method,omitempty"`
-	LineItems               []Adjustment  `xml:"line_items>adjustment,omitempty"`
-	Transactions            []Transaction `xml:"transactions>transaction,omitempty"`
+	AccountCode             hrefString      `xml:"account,omitempty"`
+	Address                 Address         `xml:"address,omitempty"`
+	SubscriptionUUID        hrefString      `xml:"subscription,omitempty"`
+	OriginalInvoiceNumber   hrefInt         `xml:"original_invoice,omitempty"`
+	UUID                    string          `xml:"uuid,omitempty"`
+	State                   string          `xml:"state,omitempty"`
+	InvoiceNumberPrefix     string          `xml:"invoice_number_prefix,omitempty"`
+	InvoiceNumber           int             `xml:"invoice_number,omitempty"`
+	PONumber                string          `xml:"po_number,omitempty"`
+	VATNumber               string          `xml:"vat_number,omitempty"`
+	SubtotalInCents         int             `xml:"subtotal_in_cents,omitempty"`
+	TaxInCents              int             `xml:"tax_in_cents,omitempty"`
+	TotalInCents            int             `xml:"total_in_cents,omitempty"`
+	BalanceInCents          int             `xml:"balance_in_cents,omitempty"`
+	Currency                string          `xml:"currency,omitempty"`
+	DueOn                   NullTime        `xml:"due_on,omitempty"`
+	CreatedAt               NullTime        `xml:"created_at,omitempty"`
+	UpdatedAt               NullTime        `xml:"updated_at,omitempty"`
+	AttemptNextCollectionAt NullTime        `xml:"attempt_next_collection_at,omitempty"`
+	ClosedAt                NullTime        `xml:"closed_at,omitempty"`
+	Type                    string          `xml:"type,omitempty"`
+	Origin                  string          `xml:"origin,omitempty"`
+	TaxType                 string          `xml:"tax_type,omitempty"`
+	TaxRegion               string          `xml:"tax_region,omitempty"`
+	TaxRate                 float64         `xml:"tax_rate,omitempty"`
+	NetTerms                NullInt         `xml:"net_terms,omitempty"`
+	CollectionMethod        string          `xml:"collection_method,omitempty"`
+	LineItems               []Adjustment    `xml:"line_items>adjustment,omitempty"`
+	Transactions            []Transaction   `xml:"transactions>transaction,omitempty"`
+	CreditPayments          []CreditPayment `xml:"credit_payment,omitempty"`
 }
 
 // OfflinePayment is a payment received outside the system to be recorded in Recurly.
